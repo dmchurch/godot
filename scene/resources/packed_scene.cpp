@@ -126,11 +126,15 @@ Ref<Resource> SceneState::get_remap_resource(const Ref<Resource> &p_resource, Ha
 Node *SceneState::instantiate(GenEditState p_edit_state) const {
 	// Nodes where instantiation failed (because something is missing.)
 	List<Node *> stray_instances;
+	HashMap<NodePath, NodePath> redirected_paths;
 
 #define NODE_FROM_ID(p_name, p_id)                      \
 	Node *p_name;                                       \
 	if (p_id & FLAG_ID_IS_PATH) {                       \
 		NodePath np = node_paths[p_id & FLAG_MASK];     \
+		if (redirected_paths.has(np)) {                 \
+			np = redirected_paths.get(np);              \
+		}                                               \
 		p_name = ret_nodes[0]->get_node_or_null(np);    \
 	} else {                                            \
 		ERR_FAIL_INDEX_V(p_id &FLAG_MASK, nc, nullptr); \
@@ -170,6 +174,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 
 		Node *parent = nullptr;
 		String old_parent_path;
+		bool used_redirect = false;
 
 		if (i > 0) {
 			ERR_FAIL_COND_V_MSG(n.parent == -1, nullptr, vformat("Invalid scene: node %s does not specify its parent node.", snames[n.name]));
@@ -181,7 +186,18 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 				nparent = ret_nodes[0];
 			}
 #endif
-			parent = child_redirects.has(nparent) ? child_redirects.get(nparent) : nparent;
+			parent = nparent;
+			if (child_redirects.has(nparent)) {
+				parent = child_redirects.get(nparent);
+				used_redirect = true;
+			}
+
+			if ((n.parent & FLAG_ID_IS_PATH) && !child_redirects.is_empty()) {
+				// even if our direct parent doesn't have a redirect, it might have been redirected itself. Check.
+				if (redirected_paths.has(node_paths[n.parent & FLAG_MASK])) {
+					used_redirect = true;
+				}
+			}
 		} else {
 			// i == 0 is root node.
 			ERR_FAIL_COND_V_MSG(n.parent != -1, nullptr, vformat("Invalid scene: root node %s cannot specify a parent node.", snames[n.name]));
@@ -483,10 +499,22 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 		}
 
 		ret_nodes[i] = node;
+		NodePath n2;
 
 		if (node && gen_node_path_cache && ret_nodes[0]) {
-			NodePath n2 = ret_nodes[0]->get_path_to(node);
+			n2 = ret_nodes[0]->get_path_to(node);
 			node_path_cache[n2] = i;
+		}
+
+		if (node && used_redirect && (n.parent & FLAG_ID_IS_PATH)) {
+			Vector<StringName> orig_path = node_paths[n.parent & FLAG_MASK].get_names();
+			orig_path.append(node->get_name());
+			if (n2 == NodePath() && ret_nodes[0]) {
+				n2 = ret_nodes[0]->get_path_to(node);
+			}
+			if (n2 != NodePath()) {
+				redirected_paths[NodePath(orig_path, node_paths[n.parent & FLAG_MASK].is_absolute())] = n2;
+			}
 		}
 	}
 

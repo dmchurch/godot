@@ -167,6 +167,7 @@ void SceneTreeDock::instantiate(const String &p_file) {
 }
 
 void SceneTreeDock::instantiate_scenes(const Vector<String> &p_files, Node *p_parent) {
+	_get_actual_child_parent(&p_parent, nullptr);
 	Node *parent = p_parent;
 
 	if (!parent) {
